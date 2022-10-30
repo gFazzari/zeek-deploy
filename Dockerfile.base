@@ -1,0 +1,78 @@
+FROM debian:bullseye-slim
+
+ARG ZEEK_VERSION
+ARG BUILD_TYPE=Release
+
+RUN apt-get update && apt-get upgrade -y
+
+RUN apt-get install -q -y --no-install-recommends \
+    cmake \
+    make \
+    gcc \
+    g++ \
+    flex \
+    bison \
+    libpcap0.8 \
+    libpcap0.8-dev \
+    libssl-dev \
+    swig \
+    zlib1g-dev \
+    curl \
+    wget \
+    python3.9-dev \
+    python3-pip \
+    python-is-python3 \
+    git \
+    openssh-client \
+    wget \
+    build-essential \
+    gawk \
+    libcurl4-openssl-dev \
+    libncurses5-dev \
+    openssl \
+    libhiredis-dev \
+    net-tools \
+    linux-headers-generic \
+    vim
+
+RUN pip3 install GitPython semantic-version &&\
+    apt-get clean && rm -rf /var/lib/apt/lists/*
+
+RUN apt-get install --reinstall -q -y --no-install-recommends ca-certificates
+
+WORKDIR /scratch
+COPY ./buildbro.sh /scratch/buildbro.sh
+RUN chmod +x /scratch/buildbro.sh &&\ 
+    /scratch/buildbro.sh ${ZEEK_VERSION} ${BUILD_TYPE}
+
+ENV PATH "/usr/local/zeek/bin:${PATH}"
+
+RUN mkdir -p /root/.ssh &&\
+    ssh-keyscan -t rsa github.com >> ~/.ssh/known_hosts
+
+RUN cd /opt &&\ 
+    git clone https://github.com/sewenew/redis-plus-plus.git &&\
+    cd redis-plus-plus &&\
+    mkdir build &&\
+    cd build &&\
+    cmake -DREDIS_PLUS_PLUS_CXX_STANDARD=17 .. &&\
+    make && make install
+
+RUN zkg autoconfig --force &&\
+    zkg install --skiptests --force zeek/ncsa/bro-doctor &&\
+    zkg install --skiptests --force https://github.com/sedarasecurity/zeek-redis &&\
+    zkg install --skiptests --force zeek-exporter --version master &&\
+    zkg install --skiptests --force zeek/hosom/file-extraction &&\
+    zkg install --skiptests --force mitre-attack/bzar
+
+RUN cd /opt &&\
+    git clone https://github.com/J-Gras/zeek-af_packet-plugin.git &&\
+    cd zeek-af_packet-plugin &&\
+    ./configure --with-latest-kernel && make && make install
+
+COPY ./entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
+
+WORKDIR /usr/local/zeek
+
+CMD ["/entrypoint.sh"]
